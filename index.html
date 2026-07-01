@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Barbearia do Parceiro — Gestão</title>
+<link rel="manifest" id="manifestLink">
+<meta name="theme-color" content="#2b1c14">
 <style>
 :root{
   --navy:#2b1c14;
@@ -264,7 +266,8 @@ body.dark tr:nth-child(even){ background:#20272f; }
   <h1 style="display:flex;align-items:center;gap:8px;">
     <img src="" id="mascoteTop" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
     Barbearia do <span class="accent">Parceiro</span>
-    <span id="settingsGear" style="cursor:pointer;font-size:1.1rem;margin-left:auto;">⚙️</span>
+    <button id="installBtn" style="display:none;background:var(--gold);color:var(--navy);border:none;border-radius:8px;padding:6px 10px;font-size:.75rem;font-weight:700;margin-left:auto;cursor:pointer;">Instalar</button>
+    <span id="settingsGear" style="cursor:pointer;font-size:1.1rem;margin-left:10px;">⚙️</span>
   </h1>
   <div class="date" id="todayLabel"></div>
   <div class="stats">
@@ -429,6 +432,26 @@ function saveData(){ docRef.set(DATA); }
 document.getElementById('mascoteLogin').src=MASCOTE;
 document.getElementById('mascoteEmoji').src=MASCOTE;
 document.getElementById('mascoteTop').src=MASCOTE;
+
+const manifest={name:"Barbearia do Parceiro",short_name:"Parceiro",start_url:".",display:"standalone",background_color:"#f4ede1",theme_color:"#2b1c14",icons:[{src:MASCOTE,sizes:"512x512",type:"image/png"}]};
+document.getElementById('manifestLink').href=URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:'application/json'}));
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault(); deferredPrompt=e;
+  document.getElementById('installBtn').style.display='inline-block';
+});
+document.getElementById('installBtn').addEventListener('click',async()=>{
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt=null;
+  document.getElementById('installBtn').style.display='none';
+});
+if('serviceWorker' in navigator){
+  const swCode="self.addEventListener('fetch',e=>{});";
+  const swUrl=URL.createObjectURL(new Blob([swCode],{type:'application/javascript'}));
+  navigator.serviceWorker.register(swUrl).catch(()=>{});
+}
 
 function renderAll(){
   renderToday();
