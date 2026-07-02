@@ -391,6 +391,16 @@ body.dark tr:nth-child(even){ background:#20272f; }
 
 <div class="modal-overlay" id="dayModalOverlay"><div class="modal"></div></div>
 
+<div class="modal-overlay" id="loyaltyOverlay">
+  <div class="modal" style="text-align:center;">
+    <canvas id="loyaltyCanvas" width="600" height="750" style="width:100%;border-radius:12px;"></canvas>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn btn-secondary" id="loyaltyClose">Fechar</button>
+      <button class="btn btn-primary" id="loyaltyDownload">Baixar imagem</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -564,9 +574,12 @@ function renderClients(){
     list.innerHTML='<div class="empty">Nenhum cliente cadastrado ainda.</div>';
   }
   DATA.clients.forEach(cl=>{
+    const count=DATA.cuts.filter(c=>c.clientName===cl.name).length;
+    const rem=count%10;
+    const badge=rem>=8?`<span style="background:var(--gold);color:var(--navy);border-radius:20px;padding:2px 10px;font-size:.72rem;font-weight:700;margin-left:8px;">${rem===9?'falta 1!':'faltam 2'}</span>`:'';
     const div=document.createElement('div');
     div.className='entry-card';
-    div.innerHTML=`<div class="info"><b>${cl.name}</b></div><button class="del" data-id="${cl.id}">🗑</button>`;
+    div.innerHTML=`<div class="info"><b>${cl.name}</b>${badge}<div class="sub">${count} corte(s) — ${rem}/10 no ciclo atual</div></div><button class="del" data-id="${cl.id}">🗑</button>`;
     list.appendChild(div);
   });
   list.querySelectorAll('.del').forEach(b=>{
@@ -750,6 +763,75 @@ document.getElementById('saveCut').addEventListener('click',()=>{
   saveData();
   closeModal();
   renderAll();
+  checkLoyalty(clientName);
+});
+
+// FIDELIDADE
+function checkLoyalty(clientName){
+  const count=DATA.cuts.filter(c=>c.clientName===clientName).length;
+  const rem=count%10;
+  let msg=null;
+  if(rem===8) msg=`Você já tem 8 cortes, ${clientName}! Faltam só 2 para ganhar 1 corte 100% grátis. 🔥`;
+  if(rem===9) msg=`Uau, ${clientName}! Você chegou a 9 cortes — no próximo, o corte é por nossa conta. Já pode escolher o estilo! 💈✨`;
+  if(rem===0 && count>0) msg=`Parabéns, ${clientName}! Você completou o ciclo de fidelidade e ganhou 1 CORTE GRÁTIS. Obrigado pela confiança! 🏆`;
+  if(msg) showLoyaltyImage(msg);
+}
+function showLoyaltyImage(message){
+  const canvas=document.getElementById('loyaltyCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#3f2a1c'); grad.addColorStop(1,'#2b1c14');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#e3b567'; ctx.lineWidth=6; ctx.strokeRect(14,14,W-28,H-28);
+  ctx.fillStyle='#e3b567'; ctx.font='bold 34px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('Barbearia do Parceiro', W/2, 80);
+  ctx.font='22px Segoe UI'; ctx.fillStyle='#f4ede1';
+  ctx.fillText('✂️  Programa de Fidelidade  ✂️', W/2, 118);
+
+  const img=new Image();
+  img.onload=()=>{
+    const size=260;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(W/2,300,size/2,0,Math.PI*2); ctx.closePath(); ctx.clip();
+    ctx.drawImage(img,W/2-size/2,170,size,size);
+    ctx.restore();
+    ctx.strokeStyle='#e3b567'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.arc(W/2,300,size/2,0,Math.PI*2); ctx.stroke();
+
+    ctx.font='bold 26px Segoe UI'; ctx.fillStyle='#e3b567';
+    wrapText(ctx,message,W/2,480,W-100,36);
+
+    ctx.font='16px Segoe UI'; ctx.fillStyle='#8a7862';
+    ctx.fillText('barbeariadoparceiro.com.br', W/2, H-30);
+
+    document.getElementById('loyaltyOverlay').classList.add('active');
+  };
+  img.src=MASCOTE;
+}
+function wrapText(ctx,text,x,y,maxWidth,lineHeight){
+  const words=text.split(' ');
+  let line='';
+  const lines=[];
+  words.forEach(word=>{
+    const test=line+word+' ';
+    if(ctx.measureText(test).width>maxWidth && line!==''){
+      lines.push(line); line=word+' ';
+    } else { line=test; }
+  });
+  lines.push(line);
+  const startY=y-((lines.length-1)*lineHeight)/2;
+  lines.forEach((l,i)=>ctx.fillText(l.trim(),x,startY+i*lineHeight));
+}
+document.getElementById('loyaltyClose').addEventListener('click',()=>{
+  document.getElementById('loyaltyOverlay').classList.remove('active');
+});
+document.getElementById('loyaltyDownload').addEventListener('click',()=>{
+  const canvas=document.getElementById('loyaltyCanvas');
+  const a=document.createElement('a');
+  a.download='fidelidade-barbearia.png';
+  a.href=canvas.toDataURL('image/png');
+  a.click();
 });
 
 // MENSAL
