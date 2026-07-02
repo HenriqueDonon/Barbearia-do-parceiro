@@ -266,9 +266,13 @@ body.dark tr:nth-child(even){ background:#20272f; }
   <h1 style="display:flex;align-items:center;gap:8px;">
     <img src="" id="mascoteTop" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
     Barbearia do <span class="accent">Parceiro</span>
-    <button id="installBtn" style="display:none;background:var(--gold);color:var(--navy);border:none;border-radius:8px;padding:6px 10px;font-size:.75rem;font-weight:700;margin-left:auto;cursor:pointer;">Instalar</button>
-    <span id="settingsGear" style="cursor:pointer;font-size:1.1rem;margin-left:10px;">⚙️</span>
+    <span id="settingsGear" style="cursor:pointer;font-size:1.1rem;margin-left:auto;">⚙️</span>
   </h1>
+  <div id="installPopup" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:var(--gold-light);padding:14px 20px;border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.3);z-index:300;gap:12px;align-items:center;">
+    <span>Instalar o app?</span>
+    <button id="installBtn" style="background:var(--gold);color:var(--navy);border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;">Instalar</button>
+    <button id="dismissInstall" style="background:none;color:var(--gold-light);border:none;font-size:1.1rem;cursor:pointer;">✕</button>
+  </div>
   <div class="date" id="todayLabel"></div>
   <div class="stats">
     <div class="stat-card"><div class="label">Ganhos hoje</div><div class="value" id="todayEarnings">R$ 0,00</div></div>
@@ -351,6 +355,10 @@ body.dark tr:nth-child(even){ background:#20272f; }
   <div class="modal">
     <h2>Novo corte</h2>
     <div class="field">
+      <label>Data</label>
+      <input type="date" id="cutDate">
+    </div>
+    <div class="field">
       <label>Cliente</label>
       <select id="cutClient"></select>
     </div>
@@ -380,6 +388,8 @@ body.dark tr:nth-child(even){ background:#20272f; }
     <button class="btn btn-secondary" id="closeSettings" style="width:100%;">Fechar</button>
   </div>
 </div>
+
+<div class="modal-overlay" id="dayModalOverlay"><div class="modal"></div></div>
 
 <div class="toast" id="toast"></div>
 
@@ -438,14 +448,20 @@ document.getElementById('manifestLink').href=URL.createObjectURL(new Blob([JSON.
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt',e=>{
   e.preventDefault(); deferredPrompt=e;
-  document.getElementById('installBtn').style.display='inline-block';
+  document.getElementById('installPopup').style.display='flex';
 });
 document.getElementById('installBtn').addEventListener('click',async()=>{
   if(!deferredPrompt) return;
   deferredPrompt.prompt();
   await deferredPrompt.userChoice;
   deferredPrompt=null;
-  document.getElementById('installBtn').style.display='none';
+  document.getElementById('installPopup').style.display='none';
+});
+document.getElementById('dismissInstall').addEventListener('click',()=>{
+  document.getElementById('installPopup').style.display='none';
+});
+window.addEventListener('appinstalled',()=>{
+  document.getElementById('installPopup').style.display='none';
 });
 if('serviceWorker' in navigator){
   const swCode="self.addEventListener('fetch',e=>{});";
@@ -522,6 +538,7 @@ function renderToday(){
         <div class="sub">${c.services.join(', ')}</div>
       </div>
       <div class="price">${fmtBRL(c.total)}</div>
+      <button class="edit" data-id="${c.id}" style="background:none;border:none;color:var(--gold);font-size:1.05rem;cursor:pointer;margin-left:8px;">✏️</button>
       <button class="del" data-id="${c.id}">🗑</button>
     `;
     list.appendChild(div);
@@ -530,6 +547,11 @@ function renderToday(){
     b.addEventListener('click',()=>{
       DATA.cuts=DATA.cuts.filter(c=>c.id!==b.dataset.id);
       saveData(); renderToday();
+    });
+  });
+  list.querySelectorAll('.edit').forEach(b=>{
+    b.addEventListener('click',()=>{
+      openModal(b.dataset.id);
     });
   });
 }
@@ -574,6 +596,7 @@ function renderServices(){
       <div><div class="sname">${s.name}</div></div>
       <div class="svc-actions">
         <span class="sval">${fmtBRL(s.price)}</span>
+        <button data-id="${s.id}" class="editSvc">✏️</button>
         <button data-id="${s.id}" class="delSvc">🗑</button>
       </div>`;
     list.appendChild(div);
@@ -582,6 +605,16 @@ function renderServices(){
     b.addEventListener('click',()=>{
       DATA.services=DATA.services.filter(s=>s.id!==b.dataset.id);
       saveData(); renderServices();
+    });
+  });
+  list.querySelectorAll('.editSvc').forEach(b=>{
+    b.addEventListener('click',()=>{
+      const s=DATA.services.find(sv=>sv.id===b.dataset.id);
+      editingSvcId=s.id;
+      document.getElementById('newSvcName').value=s.name;
+      document.getElementById('newSvcPrice').value=fmtBRL(s.price);
+      document.getElementById('addSvcBtn').textContent='Salvar alterações';
+      document.getElementById('newSvcName').scrollIntoView({behavior:'smooth',block:'center'});
     });
   });
 }
@@ -595,26 +628,53 @@ svcPriceInput.addEventListener('input',()=>{
   v=(parseInt(v||'0',10)/100);
   svcPriceInput.value=fmtBRL(v);
 });
+let editingSvcId=null;
 document.getElementById('addSvcBtn').addEventListener('click',()=>{
   const nameInput=document.getElementById('newSvcName');
   const name=nameInput.value.trim();
   const price=parseCurrencyInput(svcPriceInput.value);
   if(!name||price<=0){ showToast('Preencha nome e valor'); return; }
-  DATA.services.push({id:'s'+Date.now(),name,price});
+  if(editingSvcId){
+    const s=DATA.services.find(sv=>sv.id===editingSvcId);
+    s.name=name; s.price=price;
+    editingSvcId=null;
+    document.getElementById('addSvcBtn').textContent='Adicionar serviço';
+    showToast('Serviço atualizado');
+  } else {
+    DATA.services.push({id:'s'+Date.now(),name,price});
+    showToast('Serviço adicionado');
+  }
   saveData(); nameInput.value=''; svcPriceInput.value=''; renderServices();
-  showToast('Serviço adicionado');
 });
 
 // MODAL NOVO CORTE
 const overlay=document.getElementById('modalOverlay');
-function openModal(){
+let editingCutId=null;
+function openModal(cutId,defaultDate){
+  editingCutId=cutId||null;
   populateClientSelect();
   populateServiceChecks();
+  const modalTitle=overlay.querySelector('h2');
+  const saveBtn=document.getElementById('saveCut');
+  if(editingCutId){
+    const cut=DATA.cuts.find(c=>c.id===editingCutId);
+    modalTitle.textContent='Editar corte';
+    saveBtn.textContent='Salvar alterações';
+    document.getElementById('cutClient').value=cut.clientName;
+    document.getElementById('cutDate').value=cut.date;
+    document.querySelectorAll('.svcCheck').forEach(chk=>{
+      if(cut.services.includes(chk.dataset.name)) chk.checked=true;
+    });
+  } else {
+    modalTitle.textContent='Novo corte';
+    saveBtn.textContent='Salvar corte';
+    document.getElementById('cutDate').value=defaultDate||todayISO();
+  }
   updateCutTotal();
   overlay.classList.add('active');
 }
-function closeModal(){ overlay.classList.remove('active'); }
-document.getElementById('fabNew').addEventListener('click',openModal);
+function closeModal(){ overlay.classList.remove('active'); editingCutId=null; }
+document.getElementById('fabNew').addEventListener('click',()=>openModal(null));
 document.getElementById('cancelCut').addEventListener('click',closeModal);
 
 function populateClientSelect(){
@@ -667,22 +727,29 @@ function updateCutTotal(){
 }
 document.getElementById('saveCut').addEventListener('click',()=>{
   const clientName=document.getElementById('cutClient').value;
+  const cutDate=document.getElementById('cutDate').value||todayISO();
   const checked=Array.from(document.querySelectorAll('.svcCheck:checked'));
   if(!clientName || clientName==='__custom__'){ showToast('Selecione um cliente'); return; }
   if(checked.length===0){ showToast('Selecione ao menos um serviço'); return; }
   const services=checked.map(c=>c.dataset.name);
   const total=checked.reduce((s,c)=>s+parseFloat(c.dataset.price),0);
-  DATA.cuts.push({
-    id:'cut'+Date.now(),
-    date:todayISO(),
-    clientName,
-    services,
-    total
-  });
+  if(editingCutId){
+    const cut=DATA.cuts.find(c=>c.id===editingCutId);
+    cut.clientName=clientName; cut.services=services; cut.total=total; cut.date=cutDate;
+    showToast('Corte atualizado');
+  } else {
+    DATA.cuts.push({
+      id:'cut'+Date.now(),
+      date:cutDate,
+      clientName,
+      services,
+      total
+    });
+    showToast('Corte registrado');
+  }
   saveData();
   closeModal();
-  renderToday();
-  showToast('Corte registrado');
+  renderAll();
 });
 
 // MENSAL
@@ -702,14 +769,63 @@ function renderMonth(){
     const weekday=dateObj.toLocaleDateString('pt-BR',{weekday:'short'});
     const div=document.createElement('div');
     div.className='day-card'+(cuts.length===0?' empty-day':'');
+    div.style.cursor='pointer';
     div.innerHTML=`
       <div class="dnum">${d}</div>
       <div class="dweek">${weekday}</div>
       <div class="dcuts">${cuts.length} corte(s)</div>
       <div class="dval">${fmtBRL(total)}</div>
     `;
+    div.addEventListener('click',()=>openDayModal(iso));
     grid.appendChild(div);
   }
+}
+function openDayModal(iso){
+  const cuts=DATA.cuts.filter(c=>c.date===iso);
+  const total=cuts.reduce((s,c)=>s+c.total,0);
+  const dateFmt=new Date(iso+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
+  let html=`<h2 style="text-transform:capitalize;">${dateFmt}</h2>
+    <div class="total-box"><span>Total do dia</span><span class="amount">${fmtBRL(total)}</span></div>
+    <div class="list" id="dayModalList" style="margin-bottom:16px;"></div>
+    <button class="btn btn-primary" id="dayModalAdd" style="width:100%;margin-bottom:8px;">+ Adicionar corte neste dia</button>
+    <button class="btn btn-secondary" id="dayModalClose" style="width:100%;">Fechar</button>`;
+  const dayOverlay=document.getElementById('dayModalOverlay');
+  dayOverlay.querySelector('.modal').innerHTML=html;
+  const list=document.getElementById('dayModalList');
+  if(cuts.length===0){
+    list.innerHTML='<div class="empty">Nenhum corte neste dia.</div>';
+  } else {
+    cuts.forEach(c=>{
+      const div=document.createElement('div');
+      div.className='entry-card';
+      div.innerHTML=`
+        <div class="info"><b>${c.clientName}</b><div class="sub">${c.services.join(', ')}</div></div>
+        <div class="price">${fmtBRL(c.total)}</div>
+        <button class="edit" data-id="${c.id}" style="background:none;border:none;color:var(--gold);font-size:1.05rem;cursor:pointer;margin-left:8px;">✏️</button>
+        <button class="del" data-id="${c.id}">🗑</button>`;
+      list.appendChild(div);
+    });
+    list.querySelectorAll('.del').forEach(b=>{
+      b.addEventListener('click',()=>{
+        DATA.cuts=DATA.cuts.filter(c=>c.id!==b.dataset.id);
+        saveData(); renderMonth(); openDayModal(iso);
+      });
+    });
+    list.querySelectorAll('.edit').forEach(b=>{
+      b.addEventListener('click',()=>{
+        dayOverlay.classList.remove('active');
+        openModal(b.dataset.id);
+      });
+    });
+  }
+  document.getElementById('dayModalAdd').addEventListener('click',()=>{
+    dayOverlay.classList.remove('active');
+    openModal(null,iso);
+  });
+  document.getElementById('dayModalClose').addEventListener('click',()=>{
+    dayOverlay.classList.remove('active');
+  });
+  dayOverlay.classList.add('active');
 }
 document.getElementById('prevMonth').addEventListener('click',()=>{
   viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--;}
